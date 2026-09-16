@@ -366,6 +366,28 @@ child: const Text('Confirm Entry', style: TextStyle(fontWeight: FontWeight.bold)
 },
 );
 }
+Map<String, double> _getCategoryTotalsForTimeframe() {
+    Map<String, double> filteredTotals = {};
+    final now = DateTime.now();
+    
+    for (var tx in _userExpenses) {
+      final txDate = DateTime.tryParse(tx.id) ?? now;
+      bool matchesTimeframe = true;
+      
+      if (_selectedTimeline == 'Day') {
+        matchesTimeframe = txDate.year == now.year && txDate.month == now.month && txDate.day == now.day;
+      } else if (_selectedTimeline == 'Week') {
+        matchesTimeframe = now.difference(txDate).inDays <= 7;
+      } else if (_selectedTimeline == 'Month') {
+        matchesTimeframe = txDate.year == now.year && txDate.month == now.month;
+      }
+      
+      if (matchesTimeframe) {
+        filteredTotals[tx.category] = (filteredTotals[tx.category] ?? 0) + tx.amount;
+      }
+    }
+    return filteredTotals.isEmpty ? _categoryTotals : filteredTotals;
+  }
 @override
   Widget build(BuildContext context) {
     final bool isOverBudget = _totalExpenses > _budgetLimit;
@@ -414,12 +436,44 @@ child: const Text('Confirm Entry', style: TextStyle(fontWeight: FontWeight.bold)
                         const SizedBox(height: 6),
                         Text('₹${_activeTimeframeTotal.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 4),
-                        Text('Monthly Ceiling Threshold: ₹${_budgetLimit.toStringAsFixed(0)} | Full Month Aggregation: ₹${_totalExpenses.toStringAsFixed(0)}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
-                        const SizedBox(height: 14),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: LinearProgressIndicator(value: (_totalExpenses / _budgetLimit).clamp(0.0, 1.0), backgroundColor: Colors.white10, color: isOverBudget ? Colors.redAccent : const Color(0xFF00E676), minHeight: 8),
+                        Builder(
+                    builder: (context) {
+                      final bool isExceeded = _totalExpenses > _budgetLimit;
+                      final double remainingAmount = _budgetLimit - _totalExpenses;
+                      final double overSpentAmount = _totalExpenses - _budgetLimit;
+                      
+                      return Text(
+                        'Monthly Ceiling Threshold: ₹${_budgetLimit.toStringAsFixed(0)} | Full Month Aggregation: ₹${_totalExpenses.toStringAsFixed(0)} ' 
+                        '${isExceeded 
+                          ? '| ⚠️ Over-Spent: ₹${overSpentAmount.toStringAsFixed(0)}' 
+                          : '| Remaining: ₹${remainingAmount.toStringAsFixed(0)}'}',
+                        style: TextStyle(
+                          color: isExceeded ? Colors.redAccent : Colors.white38, 
+                          fontSize: 11,
+                          fontWeight: isExceeded ? FontWeight.bold : FontWeight.normal
                         ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: LinearProgressIndicator(value: (_totalExpenses / _budgetLimit).clamp(0.0, 1.0), backgroundColor: Colors.white10, color: isOverBudget ? Colors.redAccent : const Color(0xFF00E676), minHeight: 8),
+                  ),
+                  const SizedBox(height: 10),
+                  Builder(
+                    builder: (context) {
+                      final ratio = _totalExpenses / _budgetLimit;
+                      if (ratio >= 1.0) {
+                        return const Text('⚠️ CRITICAL STATUS: BUDGET EXCEEDED / ANOMALY DETECTED', style: TextStyle(color: Colors.redAccent, fontSize: 10, fontWeight: FontWeight.bold));
+                      } else if (ratio >= 0.90) {
+                        return const Text('🚨 ALERT: 90% THRESHOLD BREACHED / SYSTEM CEILING NEAR', style: TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold));
+                      } else if (ratio >= 0.50) {
+                        return const Text('⚡ WARNING: 50% RESOURCE CONSUMPTION VECTOR HIT', style: TextStyle(color: Colors.amberAccent, fontSize: 10, fontWeight: FontWeight.bold));
+                      }
+                      return const Text('🛡️ SYSTEM STATE: NOMINAL CONFIGURATION', style: TextStyle(color: Colors.lightGreenAccent, fontSize: 10, fontWeight: FontWeight.bold));
+                    },
+                  ),
                       ],
                     ),
                   ),
@@ -440,7 +494,15 @@ child: const Text('Confirm Entry', style: TextStyle(fontWeight: FontWeight.bold)
                           selected: isSelected,
                           selectedColor: const Color(0xFF00E676),
                           backgroundColor: const Color(0xFF16161A),
-                          onSelected: (bool selected) { if (selected) setState(() => _selectedTimeline = timeframe); },
+                          onSelected: (bool selected) {
+                            if (selected) {
+                              setState(() {
+                                _selectedTimeline = timeframe;
+                                // Forces the graphics engine to recalculate active matrix plots
+                                _getCategoryTotalsForTimeframe(); 
+                              });
+                            }
+                          },
                         );
                       }).toList(),
                     ),
@@ -454,7 +516,7 @@ child: const Text('Confirm Entry', style: TextStyle(fontWeight: FontWeight.bold)
                         child: PieChart(
                           PieChartData(
                             sectionsSpace: 4, centerSpaceRadius: 35,
-                            sections: _categoryTotals.entries.map((entry) {
+                            sections: _getCategoryTotalsForTimeframe().entries.map((entry) {
                               return PieChartSectionData(
                                 color: _getCategoryColor(entry.key), value: entry.value == 0 ? 0.1 : entry.value,
                                 title: entry.value > 0 ? '${entry.key}\n₹${entry.value.toStringAsFixed(0)}' : '', radius: 40,
